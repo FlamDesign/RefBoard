@@ -432,11 +432,12 @@
     font-size: 12px;
     word-break: break-all;
     background: #111;
-    padding: 10px;
+    padding: 10px 12px;
     border-radius: 8px;
     border: 1px solid var(--border);
     margin-bottom: 10px;
     color: var(--accent);
+    line-height: 1.6;
   }
 
   /* Drop overlay */
@@ -566,13 +567,15 @@
 <div class="modal-overlay hidden" id="share-modal">
   <div class="modal">
     <h2>SHARE BOARD</h2>
-    <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
-      The board state is encoded in the URL. Anyone with the link can view and edit.
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px;line-height:1.6">
+      Board is saved to the cloud and shared via a short link. Anyone with it can view and edit.
     </p>
-    <div id="share-url"></div>
+    <div id="share-status" style="font-family:'Azeret Mono',monospace;font-size:12px;color:var(--text-dim);margin-bottom:10px;min-height:18px;"></div>
+    <div id="share-url" style="display:none"></div>
     <div class="modal-btns">
-      <button class="btn-cancel" onclick="document.getElementById('share-modal').classList.add('hidden')">Close</button>
-      <button class="btn-primary" onclick="copyShareUrl()">Copy Link</button>
+      <button class="btn-cancel" onclick="closeShareModal()">Close</button>
+      <button class="btn-primary" id="share-copy-btn" style="display:none" onclick="copyShareUrl()">Copy Link</button>
+      <button class="btn-primary" id="share-upload-btn" onclick="uploadAndShare()">Generate Link</button>
     </div>
   </div>
 </div>
@@ -1428,19 +1431,91 @@ function createLinkNodeFromData(n) {
   nodes[id] = { el, data: { ...n } };
 }
 
-// Share: encode state in URL hash
+// ─── SHARING via JSONBlob ───
+// JSONBlob is a free, no-auth REST pastebin for JSON.
+// POST  https://jsonblob.com/api/jsonBlob          → returns Location header with blob ID
+// GET   https://jsonblob.com/api/jsonBlob/<id>     → returns the stored JSON
+// PUT   https://jsonblob.com/api/jsonBlob/<id>     → update existing blob
+// Stored blob ID goes in URL hash as #s=<id>  (short!)
+
+let _currentBlobId = null; // track if we've already uploaded this session
+
 function openShareModal() {
   _doSave();
-  try {
-    const stateStr = localStorage.getItem('moodboard_state') || '{}';
-    const compressed = btoa(unescape(encodeURIComponent(stateStr)));
-    const url = window.location.origin + window.location.pathname + '#board=' + compressed;
-    document.getElementById('share-url').textContent = url;
-    window.history.replaceState(null, '', '#board=' + compressed);
-  } catch(e) {
-    document.getElementById('share-url').textContent = 'Board is too large to encode in URL. Use the JSON export instead.';
+  // Reset UI
+  document.getElementById('share-status').textContent = '';
+  document.getElementById('share-url').style.display = 'none';
+  document.getElementById('share-url').textContent = '';
+  document.getElementById('share-copy-btn').style.display = 'none';
+  document.getElementById('share-upload-btn').style.display = 'inline-flex';
+  // If we already have a blob id from this session, show it immediately
+  if (_currentBlobId) {
+    _showShareUrl(_currentBlobId);
   }
   document.getElementById('share-modal').classList.remove('hidden');
+}
+
+function closeShareModal() {
+  document.getElementById('share-modal').classList.add('hidden');
+}
+
+async function uploadAndShare() {
+  const btn = document.getElementById('share-upload-btn');
+  const status = document.getElementById('share-status');
+  btn.disabled = true;
+  btn.textContent = 'Uploading…';
+  status.textContent = 'Saving board to cloud…';
+  status.style.color = 'var(--text-dim)';
+
+  _doSave();
+  const stateStr = localStorage.getItem('moodboard_state') || '{}';
+
+  try {
+    let blobId = _currentBlobId;
+    if (blobId) {
+      // Update existing blob
+      await fetch(`https://jsonblob.com/api/jsonBlob/${blobId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: stateStr
+      });
+    } else {
+      // Create new blob
+      const res = await fetch('https://jsonblob.com/api/jsonBlob', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: stateStr
+      });
+      if (!res.ok) throw new Error('Upload failed: ' + res.status);
+      // Blob ID is in the Location header: https://jsonblob.com/api/jsonBlob/<id>
+      const location = res.headers.get('Location') || '';
+      blobId = location.split('/').pop();
+      if (!blobId) throw new Error('No blob ID in response');
+      _currentBlobId = blobId;
+    }
+
+    _showShareUrl(blobId);
+    status.textContent = 'Board saved ✓';
+    status.style.color = 'var(--accent)';
+  } catch(err) {
+    console.error(err);
+    status.textContent = 'Upload failed — check your connection and try again.';
+    status.style.color = 'var(--danger)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Regenerate';
+  }
+}
+
+function _showShareUrl(blobId) {
+  const url = window.location.origin + window.location.pathname + '#s=' + blobId;
+  document.getElementById('share-url').textContent = url;
+  document.getElementById('share-url').style.display = 'block';
+  document.getElementById('share-copy-btn').style.display = 'inline-flex';
+  document.getElementById('share-upload-btn').style.display = 'inline-flex';
+  document.getElementById('share-upload-btn').textContent = 'Regenerate';
+  // Update address bar with short URL
+  window.history.replaceState(null, '', '#s=' + blobId);
 }
 
 function copyShareUrl() {
@@ -1464,8 +1539,37 @@ document.getElementById('board-title').addEventListener('input', saveState);
 // INIT
 // ─────────────────────────────────────────────────────────────
 function init() {
-  // Try loading from URL hash
   const hash = window.location.hash;
+
+  // Load from short share link: #s=<jsonblob-id>
+  if (hash.startsWith('#s=')) {
+    const blobId = hash.slice(3);
+    if (blobId) {
+      _currentBlobId = blobId;
+      const status = document.createElement('div');
+      status.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:"Azeret Mono",monospace;font-size:13px;color:var(--text-dim);z-index:9999;';
+      status.textContent = 'Loading board…';
+      document.body.appendChild(status);
+      fetch(`https://jsonblob.com/api/jsonBlob/${blobId}`, {
+        headers: { 'Accept': 'application/json' }
+      })
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(state => {
+        status.remove();
+        loadState(state);
+        toast('Board loaded ✓');
+      })
+      .catch(err => {
+        status.remove();
+        console.warn('Failed to load shared board:', err);
+        toast('Could not load shared board');
+        _tryLocalStorage();
+      });
+      return;
+    }
+  }
+
+  // Legacy: base64 hash #board=...
   if (hash.startsWith('#board=')) {
     try {
       const encoded = hash.slice(7);
@@ -1479,7 +1583,10 @@ function init() {
     }
   }
 
-  // Try localStorage
+  _tryLocalStorage();
+}
+
+function _tryLocalStorage() {
   try {
     const saved = localStorage.getItem('moodboard_state');
     if (saved) {

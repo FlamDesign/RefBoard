@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moodboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;1,9..40,300&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0e0e;
+    --panel: #161616;
+    --border: #2a2a2a;
+    --border-light: #333;
+    --text: #e8e8e8;
+    --text-dim: #777;
+    --accent: #c8f261;
+    --accent-dark: #a8d441;
+    --danger: #ff5959;
+    --tool-size: 40px;
+    --radius: 6px;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    user-select: none;
+  }
+
+  /* ─── CANVAS ─── */
+  #canvas-wrap {
+    position: fixed; inset: 0;
+    overflow: hidden;
+    cursor: default;
+  }
+
+  #canvas-wrap.pan-mode { cursor: grab; }
+  #canvas-wrap.pan-mode.panning { cursor: grabbing; }
+  #canvas-wrap.select-mode { cursor: default; }
+
+  #grid {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(circle, #2a2a2a 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events: none;
+  }
+
+  #board {
+    position: absolute;
+    top: 0; left: 0;
+    width: 0; height: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+
+  /* ─── NODES ─── */
+  .node {
+    position: absolute;
+    cursor: grab;
+    touch-action: none;
+    transition: box-shadow 0.15s;
+  }
+  .node:active { cursor: grabbing; }
+  .node.selected .node-inner {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .node-inner {
+    position: relative;
+    border-radius: var(--radius);
+    overflow: visible;
+  }
+
+  /* Delete button */
+  .node-del {
+    position: absolute;
+    top: -10px; right: -10px;
+    width: 22px; height: 22px;
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 13px;
+    line-height: 22px;
+    text-align: center;
+    cursor: pointer;
+    display: none;
+    z-index: 10;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .node.selected .node-del { display: block; }
+
+  /* Resize handle */
+  .resize-handle {
+    position: absolute;
+    bottom: -5px; right: -5px;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border-radius: 3px;
+    cursor: nwse-resize;
+    display: none;
+    z-index: 10;
+  }
+  .node.selected .resize-handle { display: block; }
+
+  /* ─── IMAGE NODE ─── */
+  .img-node img {
+    display: block;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius);
+    pointer-events: none;
+    background: #1a1a1a;
+  }
+  .img-node .node-inner {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+
+  /* ─── TEXT NODE ─── */
+  .text-node .node-inner {
+    background: #1e1e1e;
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    min-width: 120px;
+    min-height: 40px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  .text-node .text-content {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    color: var(--text);
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-width: 80px;
+    min-height: 20px;
+    cursor: text;
+  }
+  .text-node .text-content:empty::before {
+    content: 'Type here...';
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+
+  /* ─── STICKY NOTE ─── */
+  .sticky-node .node-inner {
+    padding: 14px;
+    min-width: 140px;
+    min-height: 80px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  }
+  .sticky-node .sticky-content {
+    font-family: 'Azeret Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    cursor: text;
+    min-height: 40px;
+    line-height: 1.6;
+  }
+  .sticky-node .sticky-content:empty::before {
+    content: 'Note...';
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .sticky-yellow .node-inner { background: #f5e17a; color: #2a2000; }
+  .sticky-pink   .node-inner { background: #f5a0c0; color: #3a0020; }
+  .sticky-blue   .node-inner { background: #7ac8f5; color: #00203a; }
+  .sticky-green  .node-inner { background: #a0f0b0; color: #003a10; }
+
+  /* ─── LINK NODE ─── */
+  .link-node .node-inner {
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    width: 260px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .link-thumb {
+    width: 100%; height: 130px;
+    object-fit: cover;
+    display: block;
+    background: #222;
+  }
+  .link-thumb-placeholder {
+    width: 100%; height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1e1e1e;
+    font-size: 32px;
+  }
+  .link-meta {
+    padding: 10px 12px 12px;
+  }
+  .link-favicon {
+    width: 14px; height: 14px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 2px;
+  }
+  .link-domain {
+    font-family: 'Azeret Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .link-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    margin-top: 4px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .link-url-display {
+    font-size: 10px;
+    font-family: 'Azeret Mono', monospace;
+    color: var(--accent);
+    margin-top: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    text-decoration: none;
+    display: block;
+  }
+  .link-url-display:hover { text-decoration: underline; }
+
+  /* ─── TOOLBAR ─── */
+  #toolbar {
+    position: fixed;
+    left: 50%; bottom: 28px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+    padding: 6px 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    z-index: 1000;
+  }
+  .tb-sep {
+    width: 1px; height: 28px;
+    background: var(--border);
+    margin: 0 4px;
+  }
+  .tb-btn {
+    width: var(--tool-size); height: var(--tool-size);
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s, color 0.12s;
+    position: relative;
+  }
+  .tb-btn:hover { background: #222; color: var(--text); }
+  .tb-btn.active { background: var(--accent); color: #0e0e0e; }
+  .tb-btn[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%; transform: translateX(-50%);
+    background: #222;
+    color: var(--text);
+    font-size: 11px;
+    font-family: 'Azeret Mono', monospace;
+    padding: 4px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+    pointer-events: none;
+    border: 1px solid var(--border);
+  }
+
+  /* Sticky color picker inside toolbar */
+  .sticky-colors {
+    display: none;
+    gap: 4px;
+    align-items: center;
+  }
+  .sticky-colors.visible { display: flex; }
+  .sc-dot {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.1s, transform 0.1s;
+  }
+  .sc-dot:hover { transform: scale(1.2); }
+  .sc-dot.active { border-color: var(--accent); }
+
+  /* ─── TOP BAR ─── */
+  #topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 50px;
+    display: flex; align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    z-index: 999;
+    pointer-events: none;
+  }
+  #topbar > * { pointer-events: all; }
+
+  #board-title {
+    font-family: 'Azeret Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+    background: transparent;
+    border: none;
+    outline: none;
+    cursor: text;
+    letter-spacing: 0.05em;
+    max-width: 220px;
+  }
+  #board-title:hover, #board-title:focus { color: var(--text); }
+
+  .top-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-family: 'Azeret Mono', monospace;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .top-btn:hover { color: var(--text); border-color: #555; }
+  .top-btn.highlight { background: var(--accent); color: #0e0e0e; border-color: var(--accent); font-weight: 500; }
+  .top-btn.highlight:hover { background: var(--accent-dark); }
+
+  #zoom-display {
+    font-family: 'Azeret Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 44px;
+    text-align: center;
+    pointer-events: all;
+    cursor: default;
+  }
+
+  /* ─── MODALS ─── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 2000;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 24px;
+    min-width: 340px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .modal h2 {
+    font-family: 'Azeret Mono', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent);
+    margin-bottom: 16px;
+    letter-spacing: 0.05em;
+  }
+  .modal input, .modal textarea {
+    width: 100%;
+    background: #111;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    outline: none;
+    margin-bottom: 10px;
+  }
+  .modal input:focus, .modal textarea:focus { border-color: var(--accent); }
+  .modal textarea { resize: vertical; min-height: 80px; }
+  .modal-btns {
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px;
+  }
+  .btn-primary {
+    padding: 8px 18px;
+    background: var(--accent);
+    color: #0e0e0e;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .btn-primary:hover { background: var(--accent-dark); }
+  .btn-cancel {
+    padding: 8px 18px;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn-cancel:hover { color: var(--text); }
+
+  /* Share modal */
+  #share-url {
+    font-family: 'Azeret Mono', monospace;
+    font-size: 12px;
+    word-break: break-all;
+    background: #111;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-bottom: 10px;
+    color: var(--accent);
+  }
+
+  /* Drop overlay */
+  #drop-overlay {
+    position: fixed; inset: 0;
+    background: rgba(200, 242, 97, 0.06);
+    border: 3px dashed var(--accent);
+    z-index: 1500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Azeret Mono', monospace;
+    font-size: 18px;
+    color: var(--accent);
+    pointer-events: none;
+  }
+  #drop-overlay.active { display: flex; }
+
+  /* Toast */
+  #toast {
+    position: fixed;
+    bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: #222;
+    color: var(--text);
+    font-family: 'Azeret Mono', monospace;
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    z-index: 3000;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Mini map */
+  #minimap {
+    position: fixed;
+    right: 16px; bottom: 90px;
+    width: 120px; height: 80px;
+    background: rgba(22,22,22,0.9);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: 500;
+  }
+  #minimap canvas { display: block; }
+
+  /* Loading spinner for link cards */
+  .link-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 80px;
+    color: var(--text-dim);
+    font-family: 'Azeret Mono', monospace;
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="topbar">
+  <input id="board-title" value="Untitled Board" maxlength="60" spellcheck="false">
+  <div style="flex:1"></div>
+  <span id="zoom-display">100%</span>
+  <button class="top-btn" onclick="fitAll()" title="Fit all">⌖ Fit</button>
+  <button class="top-btn" onclick="openShareModal()">⛓ Share</button>
+  <button class="top-btn" onclick="clearBoard()">✕ Clear</button>
+</div>
+
+<!-- Canvas -->
+<div id="canvas-wrap">
+  <div id="grid"></div>
+  <div id="board"></div>
+</div>
+
+<!-- Drop overlay -->
+<div id="drop-overlay">Drop images here</div>
+
+<!-- Toolbar -->
+<div id="toolbar">
+  <!-- Pan -->
+  <button class="tb-btn active" id="tool-pan" title="Pan (Space)" onclick="setTool('pan')">✥</button>
+  <!-- Select -->
+  <button class="tb-btn" id="tool-select" title="Select (V)" onclick="setTool('select')">↖</button>
+  <div class="tb-sep"></div>
+  <!-- Image -->
+  <button class="tb-btn" id="tool-image" title="Add Image (I)" onclick="triggerImageUpload()">🖼</button>
+  <!-- Text -->
+  <button class="tb-btn" id="tool-text" title="Add Text (T)" onclick="setTool('text')">T</button>
+  <!-- Link -->
+  <button class="tb-btn" id="tool-link" title="Add Link (L)" onclick="openLinkModal()">🔗</button>
+  <!-- Sticky -->
+  <button class="tb-btn" id="tool-sticky" title="Add Sticky (S)" onclick="toggleStickyColors()">📌</button>
+  <div class="sticky-colors" id="sticky-colors">
+    <div class="sc-dot active" style="background:#f5e17a" data-color="yellow" onclick="setStickyColor('yellow',this)"></div>
+    <div class="sc-dot" style="background:#f5a0c0" data-color="pink" onclick="setStickyColor('pink',this)"></div>
+    <div class="sc-dot" style="background:#7ac8f5" data-color="blue" onclick="setStickyColor('blue',this)"></div>
+    <div class="sc-dot" style="background:#a0f0b0" data-color="green" onclick="setStickyColor('green',this)"></div>
+  </div>
+  <div class="tb-sep"></div>
+  <!-- Zoom -->
+  <button class="tb-btn" title="Zoom out (-)" onclick="zoom(-0.15)">−</button>
+  <button class="tb-btn" title="Zoom in (+)" onclick="zoom(0.15)">+</button>
+  <button class="tb-btn" title="Reset zoom (0)" onclick="resetZoom()" style="font-size:11px;font-family:'Azeret Mono',monospace;">100</button>
+</div>
+
+<!-- Hidden image input -->
+<input type="file" id="img-input" accept="image/*" multiple style="display:none">
+
+<!-- Link modal -->
+<div class="modal-overlay hidden" id="link-modal">
+  <div class="modal">
+    <h2>ADD LINK</h2>
+    <input type="url" id="link-url-input" placeholder="https://..." />
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeLinkModal()">Cancel</button>
+      <button class="btn-primary" onclick="addLinkNode()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Share modal -->
+<div class="modal-overlay hidden" id="share-modal">
+  <div class="modal">
+    <h2>SHARE BOARD</h2>
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+      The board state is encoded in the URL. Anyone with the link can view and edit.
+    </p>
+    <div id="share-url"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="document.getElementById('share-modal').classList.add('hidden')">Close</button>
+      <button class="btn-primary" onclick="copyShareUrl()">Copy Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────
+const board = document.getElementById('board');
+const wrap  = document.getElementById('canvas-wrap');
+const grid  = document.getElementById('grid');
+
+let panX = 0, panY = 0, scale = 1;
+let tool = 'pan';
+let stickyColor = 'yellow';
+let nodeIdCounter = 0;
+let nodes = {}; // id -> { el, data }
+let selectedId = null;
+
+// Drag state
+let dragState = null;
+// {type:'pan', startX, startY, startPanX, startPanY}
+// {type:'node', id, startX, startY, startNX, startNY}
+// {type:'resize', id, startX, startY, startW, startH}
+
+let isPanning = false;
+
+// ─────────────────────────────────────────────────────────────
+// VIEWPORT
+// ─────────────────────────────────────────────────────────────
+function applyViewport() {
+  board.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+  grid.style.backgroundSize = `${28*scale}px ${28*scale}px`;
+  grid.style.backgroundPosition = `${panX}px ${panY}px`;
+  document.getElementById('zoom-display').textContent = Math.round(scale*100)+'%';
+}
+
+function zoom(delta, cx, cy) {
+  cx = cx ?? wrap.clientWidth/2;
+  cy = cy ?? wrap.clientHeight/2;
+  const prev = scale;
+  scale = Math.min(4, Math.max(0.1, scale + delta));
+  // adjust pan so zoom is centered on cx,cy
+  panX = cx - (cx - panX) * (scale/prev);
+  panY = cy - (cy - panY) * (scale/prev);
+  applyViewport();
+}
+
+function resetZoom() {
+  panX = wrap.clientWidth/2 - 400;
+  panY = wrap.clientHeight/2 - 300;
+  scale = 1;
+  applyViewport();
+}
+
+function fitAll() {
+  const ids = Object.keys(nodes);
+  if (!ids.length) { resetZoom(); return; }
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  ids.forEach(id => {
+    const d = nodes[id].data;
+    const w = d.w || 200, h = d.h || 150;
+    minX = Math.min(minX, d.x);
+    minY = Math.min(minY, d.y);
+    maxX = Math.max(maxX, d.x + w);
+    maxY = Math.max(maxY, d.y + h);
+  });
+  const pad = 80;
+  const bw = maxX - minX + pad*2, bh = maxY - minY + pad*2;
+  const s = Math.min(wrap.clientWidth/bw, wrap.clientHeight/bh, 2);
+  scale = Math.max(0.1, s);
+  panX = (wrap.clientWidth - (bw - pad*2) * scale) / 2 - (minX * scale);
+  panY = (wrap.clientHeight - (bh - pad*2) * scale) / 2 - (minY * scale);
+  applyViewport();
+}
+
+// Convert screen coords to board coords
+function screenToBoard(sx, sy) {
+  return { x: (sx - panX) / scale, y: (sy - panY) / scale };
+}
+
+function centerOfScreen() {
+  return screenToBoard(wrap.clientWidth/2, wrap.clientHeight/2);
+}
+
+// ─────────────────────────────────────────────────────────────
+// TOOLS
+// ─────────────────────────────────────────────────────────────
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('.tb-btn').forEach(b => b.classList.remove('active'));
+  const el = document.getElementById('tool-'+t);
+  if (el) el.classList.add('active');
+
+  document.getElementById('sticky-colors').classList.remove('visible');
+
+  if (t === 'pan') wrap.className = 'pan-mode';
+  else wrap.className = 'select-mode';
+}
+
+function toggleStickyColors() {
+  const sc = document.getElementById('sticky-colors');
+  const visible = sc.classList.contains('visible');
+  sc.classList.toggle('visible');
+  if (!visible) {
+    setTool('sticky');
+    document.getElementById('tool-sticky').classList.add('active');
+  }
+}
+
+function setStickyColor(color, el) {
+  stickyColor = color;
+  document.querySelectorAll('.sc-dot').forEach(d => d.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ─────────────────────────────────────────────────────────────
+// NODE CREATION
+// ─────────────────────────────────────────────────────────────
+function genId() { return 'n' + (++nodeIdCounter) + '_' + Date.now(); }
+
+function createNodeEl(id, type, x, y) {
+  const el = document.createElement('div');
+  el.className = 'node';
+  el.dataset.id = id;
+  el.style.left = x + 'px';
+  el.style.top  = y + 'px';
+
+  const inner = document.createElement('div');
+  inner.className = 'node-inner';
+  el.appendChild(inner);
+
+  const del = document.createElement('button');
+  del.className = 'node-del';
+  del.textContent = '×';
+  del.title = 'Delete';
+  del.addEventListener('click', e => { e.stopPropagation(); deleteNode(id); });
+  el.appendChild(del);
+
+  const rh = document.createElement('div');
+  rh.className = 'resize-handle';
+  el.appendChild(rh);
+
+  // Node mouse events
+  el.addEventListener('mousedown', e => onNodeMouseDown(e, id));
+  rh.addEventListener('mousedown', e => onResizeMouseDown(e, id));
+
+  board.appendChild(el);
+  return { el, inner };
+}
+
+function addImageNode(src, x, y, w, h) {
+  const id = genId();
+  const { el, inner } = createNodeEl(id, 'image', x, y);
+  el.classList.add('img-node');
+  w = w || 280; h = h || 200;
+  el.style.width = w + 'px';
+  el.style.height = h + 'px';
+
+  const img = document.createElement('img');
+  img.src = src;
+  img.draggable = false;
+  img.onload = () => {
+    if (!h) {
+      const ratio = img.naturalHeight / img.naturalWidth;
+      el.style.height = (w * ratio) + 'px';
+    }
+  };
+  inner.style.width = '100%';
+  inner.style.height = '100%';
+  inner.appendChild(img);
+
+  nodes[id] = { el, data: { type:'image', x, y, w, h, src } };
+  saveState();
+  return id;
+}
+
+function addTextNode(x, y, text) {
+  const id = genId();
+  const { el, inner } = createNodeEl(id, 'text', x, y);
+  el.classList.add('text-node');
+
+  const div = document.createElement('div');
+  div.className = 'text-content';
+  div.contentEditable = 'true';
+  div.spellcheck = false;
+  div.textContent = text || '';
+  div.addEventListener('mousedown', e => e.stopPropagation());
+  div.addEventListener('input', () => {
+    if (nodes[id]) nodes[id].data.text = div.textContent;
+    saveState();
+  });
+  inner.appendChild(div);
+
+  nodes[id] = { el, data: { type:'text', x, y, w:null, h:null, text: text||'' } };
+  if (!text) setTimeout(() => div.focus(), 50);
+  saveState();
+  return id;
+}
+
+function addStickyNode(x, y, color, text) {
+  const id = genId();
+  const { el, inner } = createNodeEl(id, 'sticky', x, y);
+  el.classList.add('sticky-node', 'sticky-' + color);
+
+  const div = document.createElement('div');
+  div.className = 'sticky-content';
+  div.contentEditable = 'true';
+  div.spellcheck = false;
+  div.textContent = text || '';
+  div.addEventListener('mousedown', e => e.stopPropagation());
+  div.addEventListener('input', () => {
+    if (nodes[id]) nodes[id].data.text = div.textContent;
+    saveState();
+  });
+  inner.appendChild(div);
+
+  nodes[id] = { el, data: { type:'sticky', x, y, w:null, h:null, color, text: text||'' } };
+  if (!text) setTimeout(() => div.focus(), 50);
+  saveState();
+  return id;
+}
+
+function addLinkNode(url, title, imgSrc, x, y) {
+  const id = genId();
+  const { el, inner } = createNodeEl(id, 'link', x, y);
+  el.classList.add('link-node');
+  el.style.width = '260px';
+
+  // Thumbnail
+  if (imgSrc) {
+    const img = document.createElement('img');
+    img.className = 'link-thumb';
+    img.src = imgSrc;
+    img.onerror = () => img.replaceWith(makePlaceholder(url));
+    inner.appendChild(img);
+  } else {
+    inner.appendChild(makePlaceholder(url));
+  }
+
+  // Meta
+  const meta = document.createElement('div');
+  meta.className = 'link-meta';
+
+  let domain = '';
+  try { domain = new URL(url).hostname.replace('www.',''); } catch(e) {}
+
+  const domainLine = document.createElement('div');
+  domainLine.className = 'link-domain';
+
+  const fav = document.createElement('img');
+  fav.className = 'link-favicon';
+  fav.src = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+  fav.onerror = () => fav.remove();
+  domainLine.appendChild(fav);
+  domainLine.appendChild(document.createTextNode(domain));
+  meta.appendChild(domainLine);
+
+  if (title) {
+    const t = document.createElement('div');
+    t.className = 'link-title';
+    t.textContent = title;
+    meta.appendChild(t);
+  }
+
+  const a = document.createElement('a');
+  a.className = 'link-url-display';
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = url;
+  a.addEventListener('mousedown', e => e.stopPropagation());
+  meta.appendChild(a);
+
+  inner.appendChild(meta);
+
+  nodes[id] = { el, data: { type:'link', x, y, w:260, h:null, url, title: title||'', imgSrc: imgSrc||'' } };
+  saveState();
+  return id;
+}
+
+function makePlaceholder(url) {
+  const ph = document.createElement('div');
+  ph.className = 'link-thumb-placeholder';
+  ph.textContent = '🔗';
+  return ph;
+}
+
+function deleteNode(id) {
+  if (nodes[id]) {
+    nodes[id].el.remove();
+    delete nodes[id];
+    if (selectedId === id) selectedId = null;
+    saveState();
+  }
+}
+
+function clearBoard() {
+  if (!confirm('Clear the entire board? This cannot be undone.')) return;
+  Object.keys(nodes).forEach(deleteNode);
+  nodes = {}; nodeIdCounter = 0; selectedId = null;
+  saveState();
+}
+
+// ─────────────────────────────────────────────────────────────
+// SELECTION
+// ─────────────────────────────────────────────────────────────
+function selectNode(id) {
+  if (selectedId && nodes[selectedId]) {
+    nodes[selectedId].el.classList.remove('selected');
+  }
+  selectedId = id;
+  if (id && nodes[id]) {
+    nodes[id].el.classList.add('selected');
+  }
+}
+
+function deselect() {
+  selectNode(null);
+}
+
+// ─────────────────────────────────────────────────────────────
+// DRAG / INTERACTION
+// ─────────────────────────────────────────────────────────────
+function onNodeMouseDown(e, id) {
+  if (e.button !== 0) return;
+  e.stopPropagation();
+  selectNode(id);
+
+  if (tool === 'pan') {
+    // drag node even in pan mode
+  }
+
+  const d = nodes[id].data;
+  dragState = {
+    type: 'node', id,
+    startX: e.clientX, startY: e.clientY,
+    startNX: d.x, startNY: d.y
+  };
+}
+
+function onResizeMouseDown(e, id) {
+  if (e.button !== 0) return;
+  e.stopPropagation();
+  e.preventDefault();
+  const d = nodes[id].data;
+  const el = nodes[id].el;
+  dragState = {
+    type: 'resize', id,
+    startX: e.clientX, startY: e.clientY,
+    startW: el.offsetWidth,
+    startH: el.offsetHeight
+  };
+}
+
+wrap.addEventListener('mousedown', e => {
+  if (e.target !== wrap && e.target !== board && e.target !== grid) return;
+  if (e.button !== 0) return;
+
+  deselect();
+
+  if (tool === 'pan') {
+    dragState = { type:'pan', startX: e.clientX, startY: e.clientY, startPanX: panX, startPanY: panY };
+    wrap.classList.add('panning');
+  }
+  if (tool === 'text') {
+    const pos = screenToBoard(e.clientX, e.clientY);
+    addTextNode(pos.x, pos.y, '');
+    setTool('select');
+  }
+  if (tool === 'sticky') {
+    const pos = screenToBoard(e.clientX, e.clientY);
+    addStickyNode(pos.x, pos.y, stickyColor, '');
+    setTool('select');
+    document.getElementById('sticky-colors').classList.remove('visible');
+  }
+});
+
+document.addEventListener('mousemove', e => {
+  if (!dragState) return;
+  if (dragState.type === 'pan') {
+    panX = dragState.startPanX + (e.clientX - dragState.startX);
+    panY = dragState.startPanY + (e.clientY - dragState.startY);
+    applyViewport();
+  } else if (dragState.type === 'node') {
+    const id = dragState.id;
+    if (!nodes[id]) return;
+    const dx = (e.clientX - dragState.startX) / scale;
+    const dy = (e.clientY - dragState.startY) / scale;
+    const nx = dragState.startNX + dx;
+    const ny = dragState.startNY + dy;
+    nodes[id].el.style.left = nx + 'px';
+    nodes[id].el.style.top  = ny + 'px';
+    nodes[id].data.x = nx;
+    nodes[id].data.y = ny;
+  } else if (dragState.type === 'resize') {
+    const id = dragState.id;
+    if (!nodes[id]) return;
+    const dw = (e.clientX - dragState.startX) / scale;
+    const dh = (e.clientY - dragState.startY) / scale;
+    const w = Math.max(80, dragState.startW + dw);
+    const h = Math.max(60, dragState.startH + dh);
+    nodes[id].el.style.width  = w + 'px';
+    nodes[id].el.style.height = h + 'px';
+    nodes[id].data.w = w;
+    nodes[id].data.h = h;
+  }
+});
+
+document.addEventListener('mouseup', e => {
+  if (dragState) {
+    if (dragState.type !== 'pan') saveState();
+    dragState = null;
+    wrap.classList.remove('panning');
+  }
+});
+
+// ─── Trackpad & Mouse Wheel ───
+// MacBook trackpad sends:
+//   • Two-finger scroll  → wheel event, ctrlKey=false, deltaX/deltaY in pixels (small values)
+//   • Pinch to zoom      → wheel event, ctrlKey=true,  deltaY is the pinch scale delta
+//   • Mouse wheel        → wheel event, ctrlKey=false, deltaY large (line/page mode)
+//
+// Strategy: if ctrlKey → zoom (pinch or ctrl+scroll).
+//           else if deltaMode===0 and |deltaX|+|deltaY| small → pan (trackpad scroll).
+//           else → zoom (mouse wheel).
+
+// Smooth pan momentum
+let _velX = 0, _velY = 0, _rafPan = null;
+function _panMomentum() {
+  if (Math.abs(_velX) < 0.2 && Math.abs(_velY) < 0.2) { _rafPan = null; return; }
+  panX += _velX; panY += _velY;
+  _velX *= 0.88; _velY *= 0.88;
+  applyViewport();
+  _rafPan = requestAnimationFrame(_panMomentum);
+}
+
+// Pinch zoom uses multiplicative scale (feels natural)
+function zoomAt(factor, cx, cy) {
+  const prev = scale;
+  scale = Math.min(4, Math.max(0.1, scale * factor));
+  panX = cx - (cx - panX) * (scale / prev);
+  panY = cy - (cy - panY) * (scale / prev);
+  applyViewport();
+}
+
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+
+  if (e.ctrlKey) {
+    // Pinch-to-zoom (trackpad) or Ctrl+scroll (mouse)
+    // deltaY is negative when pinching out (zoom in)
+    // Use exponential feel: factor = e^(-dy * sensitivity)
+    const sensitivity = 0.008;
+    const factor = Math.exp(-e.deltaY * sensitivity);
+    zoomAt(factor, e.clientX, e.clientY);
+    // Kill momentum
+    _velX = 0; _velY = 0;
+    if (_rafPan) { cancelAnimationFrame(_rafPan); _rafPan = null; }
+    return;
+  }
+
+  // Detect trackpad vs mouse wheel:
+  // Trackpad: deltaMode===0 (pixels), values are small floats
+  // Mouse wheel: deltaMode===1 (lines) or large pixel jumps
+  const isTrackpad = e.deltaMode === 0 && Math.abs(e.deltaY) < 50 && !e.shiftKey;
+
+  if (isTrackpad) {
+    // Two-finger scroll → pan with momentum
+    if (_rafPan) cancelAnimationFrame(_rafPan);
+    panX -= e.deltaX;
+    panY -= e.deltaY;
+    applyViewport();
+    // Seed momentum (decays quickly so it feels snappy)
+    _velX = -e.deltaX * 0.15;
+    _velY = -e.deltaY * 0.15;
+    _rafPan = requestAnimationFrame(_panMomentum);
+  } else {
+    // Mouse wheel → zoom centered on cursor
+    const factor = e.deltaY > 0 ? 0.88 : 1.14;
+    zoomAt(factor, e.clientX, e.clientY);
+  }
+}, { passive: false });
+
+// Touch events for mobile / real pinch fallback
+let _touches = {};
+let _lastPinchDist = null;
+let _lastTouchMid = null;
+
+wrap.addEventListener('touchstart', e => {
+  e.preventDefault();
+  Array.from(e.changedTouches).forEach(t => { _touches[t.identifier] = { x: t.clientX, y: t.clientY }; });
+  if (Object.keys(_touches).length === 2) {
+    const [a, b] = Object.values(_touches);
+    _lastPinchDist = Math.hypot(b.x - a.x, b.y - a.y);
+    _lastTouchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchmove', e => {
+  e.preventDefault();
+  Array.from(e.changedTouches).forEach(t => { _touches[t.identifier] = { x: t.clientX, y: t.clientY }; });
+  const pts = Object.values(_touches);
+
+  if (pts.length === 1) {
+    // Single finger pan
+    const [a] = pts;
+    const prev = _touches[Object.keys(_touches)[0]];
+    // Use delta
+  } else if (pts.length === 2) {
+    const [a, b] = pts;
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (_lastPinchDist !== null) {
+      const factor = dist / _lastPinchDist;
+      zoomAt(factor, mid.x, mid.y);
+    }
+    if (_lastTouchMid) {
+      panX += mid.x - _lastTouchMid.x;
+      panY += mid.y - _lastTouchMid.y;
+      applyViewport();
+    }
+    _lastPinchDist = dist;
+    _lastTouchMid = mid;
+  }
+}, { passive: false });
+
+wrap.addEventListener('touchend', e => {
+  Array.from(e.changedTouches).forEach(t => { delete _touches[t.identifier]; });
+  if (Object.keys(_touches).length < 2) {
+    _lastPinchDist = null;
+    _lastTouchMid = null;
+  }
+}, { passive: false });
+
+// ─────────────────────────────────────────────────────────────
+// IMAGE UPLOAD
+// ─────────────────────────────────────────────────────────────
+function triggerImageUpload() {
+  document.getElementById('img-input').click();
+}
+
+document.getElementById('img-input').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  handleImageFiles(files, null);
+  e.target.value = '';
+});
+
+function handleImageFiles(files, dropPos) {
+  let offset = 0;
+  files.forEach(f => {
+    if (!f.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const pos = dropPos
+        ? { x: dropPos.x + offset, y: dropPos.y + offset }
+        : screenToBoard(wrap.clientWidth/2 + offset*10, wrap.clientHeight/2 + offset*10);
+      const id = addImageNode(ev.target.result, pos.x - 140, pos.y - 100, 280, null);
+      offset += 20;
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+// Drag & drop files
+wrap.addEventListener('dragover', e => {
+  e.preventDefault();
+  document.getElementById('drop-overlay').classList.add('active');
+});
+wrap.addEventListener('dragleave', e => {
+  if (!wrap.contains(e.relatedTarget)) {
+    document.getElementById('drop-overlay').classList.remove('active');
+  }
+});
+wrap.addEventListener('drop', e => {
+  e.preventDefault();
+  document.getElementById('drop-overlay').classList.remove('active');
+  const pos = screenToBoard(e.clientX, e.clientY);
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  if (files.length) {
+    handleImageFiles(files, pos);
+    return;
+  }
+  // Try dropped URL / text
+  const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+  if (url && url.startsWith('http')) {
+    fetchAndAddLink(url, pos);
+  }
+});
+
+// Paste images
+document.addEventListener('paste', e => {
+  const items = Array.from(e.clipboardData.items);
+  const imgItems = items.filter(i => i.type.startsWith('image/'));
+  if (imgItems.length) {
+    imgItems.forEach(item => {
+      const file = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const pos = centerOfScreen();
+        addImageNode(ev.target.result, pos.x - 140, pos.y - 100, 280, null);
+      };
+      reader.readAsDataURL(file);
+    });
+    return;
+  }
+  const text = e.clipboardData.getData('text/plain');
+  if (text && (text.startsWith('http://') || text.startsWith('https://'))) {
+    const pos = centerOfScreen();
+    fetchAndAddLink(text, pos);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// LINK FETCHING
+// ─────────────────────────────────────────────────────────────
+function openLinkModal() {
+  document.getElementById('link-modal').classList.remove('hidden');
+  document.getElementById('link-url-input').focus();
+}
+function closeLinkModal() {
+  document.getElementById('link-modal').classList.add('hidden');
+  document.getElementById('link-url-input').value = '';
+}
+
+document.getElementById('link-url-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addLinkNode();
+  if (e.key === 'Escape') closeLinkModal();
+});
+
+async function addLinkNode_fromModal() {
+  const url = document.getElementById('link-url-input').value.trim();
+  if (!url) return;
+  closeLinkModal();
+  const pos = centerOfScreen();
+  await fetchAndAddLink(url, pos);
+}
+// override the onclick
+document.querySelector('#link-modal .btn-primary').onclick = addLinkNode_fromModal;
+
+async function fetchAndAddLink(url, pos) {
+  // Normalize
+  if (!url.startsWith('http')) url = 'https://' + url;
+  // Use allorigins to fetch OG data
+  const id = genId();
+  // Create placeholder while loading
+  const { el, inner } = createNodeEl(id, 'link', pos.x - 130, pos.y - 80);
+  el.classList.add('link-node');
+  el.style.width = '260px';
+  inner.innerHTML = `<div class="link-loading">Loading preview…</div>`;
+  nodes[id] = { el, data: { type:'link', x: pos.x-130, y: pos.y-80, w:260, h:null, url, title:'', imgSrc:'' } };
+
+  let title = '', imgSrc = '';
+  try {
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const r = await fetch(proxyUrl);
+    const json = await r.json();
+    const html = json.contents || '';
+    // Parse OG tags
+    const ogTitle   = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+                   || html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '';
+    const ogImage   = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1] || '';
+    title = ogTitle;
+    imgSrc = ogImage;
+  } catch(e) {}
+
+  // Remove placeholder el & recreate properly
+  el.remove();
+  delete nodes[id];
+  nodeIdCounter--; // reuse
+
+  const newId = addLinkNode(url, title, imgSrc, pos.x - 130, pos.y - 80);
+}
+
+// ─────────────────────────────────────────────────────────────
+// KEYBOARD
+// ─────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement.tagName;
+  const editable = document.activeElement.isContentEditable
+    || tag === 'INPUT' || tag === 'TEXTAREA';
+
+  if (!editable) {
+    if (e.key === ' ' && !e.repeat) { e.preventDefault(); setTool('pan'); }
+    if (e.key === 'v' || e.key === 'V') setTool('select');
+    if (e.key === 't' || e.key === 'T') setTool('text');
+    if (e.key === 'i' || e.key === 'I') triggerImageUpload();
+    if (e.key === 'l' || e.key === 'L') openLinkModal();
+    if (e.key === 's' || e.key === 'S') toggleStickyColors();
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) deleteNode(selectedId);
+    if (e.key === '=' || e.key === '+') zoom(0.15);
+    if (e.key === '-') zoom(-0.15);
+    if (e.key === '0') resetZoom();
+    if (e.key === 'f' || e.key === 'F') fitAll();
+    if (e.key === 'Escape') deselect();
+  }
+});
+document.addEventListener('keyup', e => {
+  if (e.key === ' ') setTool('select');
+});
+
+// ─────────────────────────────────────────────────────────────
+// PERSISTENCE & SHARING
+// ─────────────────────────────────────────────────────────────
+let saveTimer = null;
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(_doSave, 400);
+}
+
+function _doSave() {
+  const state = {
+    title: document.getElementById('board-title').value,
+    panX, panY, scale,
+    nodes: Object.entries(nodes).map(([id, {data}]) => ({ id, ...data }))
+  };
+  try {
+    const json = JSON.stringify(state);
+    localStorage.setItem('moodboard_state', json);
+  } catch(e) {}
+}
+
+function loadState(state) {
+  if (!state) return;
+  // Clear
+  Object.keys(nodes).forEach(id => { nodes[id].el.remove(); });
+  nodes = {};
+
+  if (state.title) document.getElementById('board-title').value = state.title;
+  panX = state.panX ?? 0;
+  panY = state.panY ?? 0;
+  scale = state.scale ?? 1;
+  applyViewport();
+
+  (state.nodes || []).forEach(n => {
+    const id = n.id;
+    // bump counter
+    const num = parseInt(id.split('_')[0].replace('n','')) || 0;
+    if (num >= nodeIdCounter) nodeIdCounter = num + 1;
+
+    if (n.type === 'image') {
+      createImageNodeFromData(n);
+    } else if (n.type === 'text') {
+      createTextNodeFromData(n);
+    } else if (n.type === 'sticky') {
+      createStickyNodeFromData(n);
+    } else if (n.type === 'link') {
+      createLinkNodeFromData(n);
+    }
+  });
+}
+
+function createImageNodeFromData(n) {
+  const id = n.id;
+  const { el, inner } = createNodeEl(id, 'image', n.x, n.y);
+  el.classList.add('img-node');
+  if (n.w) el.style.width = n.w + 'px';
+  if (n.h) el.style.height = n.h + 'px';
+  const img = document.createElement('img');
+  img.src = n.src;
+  img.draggable = false;
+  inner.style.width = '100%';
+  inner.style.height = '100%';
+  inner.appendChild(img);
+  nodes[id] = { el, data: { ...n } };
+}
+
+function createTextNodeFromData(n) {
+  const id = n.id;
+  const { el, inner } = createNodeEl(id, 'text', n.x, n.y);
+  el.classList.add('text-node');
+  if (n.w) el.style.width = n.w + 'px';
+  const div = document.createElement('div');
+  div.className = 'text-content';
+  div.contentEditable = 'true';
+  div.spellcheck = false;
+  div.textContent = n.text || '';
+  div.addEventListener('mousedown', e => e.stopPropagation());
+  div.addEventListener('input', () => { if (nodes[id]) nodes[id].data.text = div.textContent; saveState(); });
+  inner.appendChild(div);
+  nodes[id] = { el, data: { ...n } };
+}
+
+function createStickyNodeFromData(n) {
+  const id = n.id;
+  const { el, inner } = createNodeEl(id, 'sticky', n.x, n.y);
+  el.classList.add('sticky-node', 'sticky-' + (n.color || 'yellow'));
+  if (n.w) el.style.width = n.w + 'px';
+  if (n.h) el.style.height = n.h + 'px';
+  const div = document.createElement('div');
+  div.className = 'sticky-content';
+  div.contentEditable = 'true';
+  div.spellcheck = false;
+  div.textContent = n.text || '';
+  div.addEventListener('mousedown', e => e.stopPropagation());
+  div.addEventListener('input', () => { if (nodes[id]) nodes[id].data.text = div.textContent; saveState(); });
+  inner.appendChild(div);
+  nodes[id] = { el, data: { ...n } };
+}
+
+function createLinkNodeFromData(n) {
+  const id = n.id;
+  const { el, inner } = createNodeEl(id, 'link', n.x, n.y);
+  el.classList.add('link-node');
+  el.style.width = '260px';
+  if (n.w) el.style.width = n.w + 'px';
+  if (n.h) el.style.height = n.h + 'px';
+
+  if (n.imgSrc) {
+    const img = document.createElement('img');
+    img.className = 'link-thumb';
+    img.src = n.imgSrc;
+    img.onerror = () => img.replaceWith(makePlaceholder(n.url));
+    inner.appendChild(img);
+  } else {
+    inner.appendChild(makePlaceholder(n.url));
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'link-meta';
+  let domain = '';
+  try { domain = new URL(n.url).hostname.replace('www.',''); } catch(e) {}
+
+  const domainLine = document.createElement('div');
+  domainLine.className = 'link-domain';
+  const fav = document.createElement('img');
+  fav.className = 'link-favicon';
+  fav.src = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+  fav.onerror = () => fav.remove();
+  domainLine.appendChild(fav);
+  domainLine.appendChild(document.createTextNode(domain));
+  meta.appendChild(domainLine);
+
+  if (n.title) {
+    const t = document.createElement('div');
+    t.className = 'link-title';
+    t.textContent = n.title;
+    meta.appendChild(t);
+  }
+  const a = document.createElement('a');
+  a.className = 'link-url-display';
+  a.href = n.url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = n.url;
+  a.addEventListener('mousedown', e => e.stopPropagation());
+  meta.appendChild(a);
+  inner.appendChild(meta);
+
+  nodes[id] = { el, data: { ...n } };
+}
+
+// Share: encode state in URL hash
+function openShareModal() {
+  _doSave();
+  try {
+    const stateStr = localStorage.getItem('moodboard_state') || '{}';
+    const compressed = btoa(unescape(encodeURIComponent(stateStr)));
+    const url = window.location.origin + window.location.pathname + '#board=' + compressed;
+    document.getElementById('share-url').textContent = url;
+    window.history.replaceState(null, '', '#board=' + compressed);
+  } catch(e) {
+    document.getElementById('share-url').textContent = 'Board is too large to encode in URL. Use the JSON export instead.';
+  }
+  document.getElementById('share-modal').classList.remove('hidden');
+}
+
+function copyShareUrl() {
+  const text = document.getElementById('share-url').textContent;
+  navigator.clipboard.writeText(text).then(() => toast('Link copied!'));
+}
+
+function toast(msg, dur = 2000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), dur);
+}
+
+// ─────────────────────────────────────────────────────────────
+// BOARD TITLE
+// ─────────────────────────────────────────────────────────────
+document.getElementById('board-title').addEventListener('input', saveState);
+
+// ─────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────
+function init() {
+  // Try loading from URL hash
+  const hash = window.location.hash;
+  if (hash.startsWith('#board=')) {
+    try {
+      const encoded = hash.slice(7);
+      const json = decodeURIComponent(escape(atob(encoded)));
+      const state = JSON.parse(json);
+      loadState(state);
+      toast('Board loaded from link ✓');
+      return;
+    } catch(e) {
+      console.warn('Failed to load from URL hash:', e);
+    }
+  }
+
+  // Try localStorage
+  try {
+    const saved = localStorage.getItem('moodboard_state');
+    if (saved) {
+      const state = JSON.parse(saved);
+      loadState(state);
+      return;
+    }
+  } catch(e) {}
+
+  // Fresh board
+  resetZoom();
+  setTool('pan');
+}
+
+setTool('pan');
+applyViewport();
+init();
+
+// Welcome hint if truly empty
+setTimeout(() => {
+  if (Object.keys(nodes).length === 0) {
+    // Add a welcome text node
+    const pos = centerOfScreen();
+    addTextNode(pos.x - 180, pos.y - 60, 'Welcome to Moodboard ✦\nDrag images, paste links, add stickies.\nRight-click drag or use toolbar to pan.');
+    saveState();
+  }
+}, 100);
+</script>
+</body>
+</html>

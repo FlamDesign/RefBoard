@@ -568,7 +568,7 @@
   <div class="modal">
     <h2>SHARE BOARD</h2>
     <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px;line-height:1.6">
-      Board is saved to the cloud and shared via a short link. Anyone with it can view and edit.
+      Saves your board as an anonymous GitHub Gist and gives you a short shareable link. No login needed.
     </p>
     <div id="share-status" style="font-family:'Azeret Mono',monospace;font-size:12px;color:var(--text-dim);margin-bottom:10px;min-height:18px;"></div>
     <div id="share-url" style="display:none"></div>
@@ -1431,27 +1431,26 @@ function createLinkNodeFromData(n) {
   nodes[id] = { el, data: { ...n } };
 }
 
-// ─── SHARING via JSONBlob ───
-// JSONBlob is a free, no-auth REST pastebin for JSON.
-// POST  https://jsonblob.com/api/jsonBlob          → returns Location header with blob ID
-// GET   https://jsonblob.com/api/jsonBlob/<id>     → returns the stored JSON
-// PUT   https://jsonblob.com/api/jsonBlob/<id>     → update existing blob
-// Stored blob ID goes in URL hash as #s=<id>  (short!)
+// ─── SHARING via GitHub Gist (anonymous) ───
+// GitHub's Gist API supports full CORS and allows anonymous gist creation.
+// No API key or login needed. Returns a short gist ID.
+// POST https://api.github.com/gists  → { id, ... }
+// GET  https://api.github.com/gists/<id>  → { files: { "board.json": { content } } }
+// PATCH https://api.github.com/gists/<id>  → update
+// URL hash: #s=<gistId>
 
-let _currentBlobId = null; // track if we've already uploaded this session
+let _currentGistId = null;
 
 function openShareModal() {
   _doSave();
-  // Reset UI
   document.getElementById('share-status').textContent = '';
   document.getElementById('share-url').style.display = 'none';
   document.getElementById('share-url').textContent = '';
   document.getElementById('share-copy-btn').style.display = 'none';
   document.getElementById('share-upload-btn').style.display = 'inline-flex';
-  // If we already have a blob id from this session, show it immediately
-  if (_currentBlobId) {
-    _showShareUrl(_currentBlobId);
-  }
+  document.getElementById('share-upload-btn').textContent = 'Generate Link';
+  document.getElementById('share-upload-btn').disabled = false;
+  if (_currentGistId) _showShareUrl(_currentGistId);
   document.getElementById('share-modal').classList.remove('hidden');
 }
 
@@ -1460,62 +1459,79 @@ function closeShareModal() {
 }
 
 async function uploadAndShare() {
-  const btn = document.getElementById('share-upload-btn');
+  const btn    = document.getElementById('share-upload-btn');
   const status = document.getElementById('share-status');
   btn.disabled = true;
   btn.textContent = 'Uploading…';
-  status.textContent = 'Saving board to cloud…';
   status.style.color = 'var(--text-dim)';
+  status.textContent = 'Saving board…';
 
   _doSave();
   const stateStr = localStorage.getItem('moodboard_state') || '{}';
 
+  // Validate JSON size — Gist supports up to ~10 MB
+  const kb = (new Blob([stateStr]).size / 1024).toFixed(0);
+  status.textContent = `Saving board (${kb} KB)…`;
+
   try {
-    let blobId = _currentBlobId;
-    if (blobId) {
-      // Update existing blob
-      await fetch(`https://jsonblob.com/api/jsonBlob/${blobId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: stateStr
+    const payload = {
+      description: document.getElementById('board-title').value || 'Moodboard',
+      public: false,
+      files: { 'board.json': { content: stateStr } }
+    };
+
+    let gistId = _currentGistId;
+    let res;
+
+    if (gistId) {
+      // Update existing gist
+      res = await fetch(`https://api.github.com/gists/${gistId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' },
+        body: JSON.stringify(payload)
       });
     } else {
-      // Create new blob
-      const res = await fetch('https://jsonblob.com/api/jsonBlob', {
+      // Create new anonymous gist
+      res = await fetch('https://api.github.com/gists', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: stateStr
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' },
+        body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error('Upload failed: ' + res.status);
-      // Blob ID is in the Location header: https://jsonblob.com/api/jsonBlob/<id>
-      const location = res.headers.get('Location') || '';
-      blobId = location.split('/').pop();
-      if (!blobId) throw new Error('No blob ID in response');
-      _currentBlobId = blobId;
     }
 
-    _showShareUrl(blobId);
-    status.textContent = 'Board saved ✓';
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`GitHub API ${res.status}: ${errBody}`);
+    }
+
+    const data = await res.json();
+    gistId = data.id;
+    if (!gistId) throw new Error('No gist ID returned');
+    _currentGistId = gistId;
+
+    _showShareUrl(gistId);
+    status.textContent = `Saved ✓  (${kb} KB)`;
     status.style.color = 'var(--accent)';
+
   } catch(err) {
-    console.error(err);
-    status.textContent = 'Upload failed — check your connection and try again.';
+    console.error('Share error:', err);
+    status.textContent = '✕ ' + (err.message || 'Upload failed');
     status.style.color = 'var(--danger)';
-  } finally {
     btn.disabled = false;
-    btn.textContent = 'Regenerate';
+    btn.textContent = 'Try Again';
   }
 }
 
-function _showShareUrl(blobId) {
-  const url = window.location.origin + window.location.pathname + '#s=' + blobId;
+function _showShareUrl(gistId) {
+  const url = window.location.origin + window.location.pathname + '#s=' + gistId;
   document.getElementById('share-url').textContent = url;
   document.getElementById('share-url').style.display = 'block';
   document.getElementById('share-copy-btn').style.display = 'inline-flex';
-  document.getElementById('share-upload-btn').style.display = 'inline-flex';
-  document.getElementById('share-upload-btn').textContent = 'Regenerate';
-  // Update address bar with short URL
-  window.history.replaceState(null, '', '#s=' + blobId);
+  const btn = document.getElementById('share-upload-btn');
+  btn.disabled = false;
+  btn.style.display = 'inline-flex';
+  btn.textContent = 'Update Link';
+  window.history.replaceState(null, '', '#s=' + gistId);
 }
 
 function copyShareUrl() {
@@ -1541,19 +1557,24 @@ document.getElementById('board-title').addEventListener('input', saveState);
 function init() {
   const hash = window.location.hash;
 
-  // Load from short share link: #s=<jsonblob-id>
+  // Load from short share link: #s=<gist-id>
   if (hash.startsWith('#s=')) {
-    const blobId = hash.slice(3);
-    if (blobId) {
-      _currentBlobId = blobId;
+    const gistId = hash.slice(3);
+    if (gistId) {
+      _currentGistId = gistId;
       const status = document.createElement('div');
-      status.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:"Azeret Mono",monospace;font-size:13px;color:var(--text-dim);z-index:9999;';
+      status.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:"Azeret Mono",monospace;font-size:13px;color:var(--text-dim);z-index:9999;background:var(--panel);padding:16px 24px;border-radius:10px;border:1px solid var(--border);';
       status.textContent = 'Loading board…';
       document.body.appendChild(status);
-      fetch(`https://jsonblob.com/api/jsonBlob/${blobId}`, {
-        headers: { 'Accept': 'application/json' }
+      fetch(`https://api.github.com/gists/${gistId}`, {
+        headers: { 'Accept': 'application/vnd.github+json' }
       })
       .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(data => {
+        const content = data.files?.['board.json']?.content;
+        if (!content) throw new Error('board.json not found in gist');
+        return JSON.parse(content);
+      })
       .then(state => {
         status.remove();
         loadState(state);
